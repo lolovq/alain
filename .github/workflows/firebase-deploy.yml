@@ -1,0 +1,55 @@
+name: Firebase CI/CD
+
+on: 
+  push:
+    branches:
+      - main # Of de branch die je gebruikt voor deployments (bijv. master, develop)
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18' # Zorg dat dit overeenkomt met de Node.js versie in je functions/package.json
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Install Functions dependencies
+        run: npm install
+        working-directory: ./functions # Zorg dat dit pad correct is naar je functions directory
+
+      - name: Build Functions
+        run: npm run build
+        working-directory: ./functions # Zorg dat dit pad correct is naar je functions directory
+
+      - name: Install Web App dependencies
+        run: npm install
+        working-directory: ./web-app # Zorg dat dit pad correct is naar je web-app directory
+
+      - name: Build Web App
+        run: npm run build
+        working-directory: ./web-app # Zorg dat dit pad correct is naar je web-app directory
+
+      - name: Run Functions Tests
+        run: npm test
+        working-directory: ./functions # Zorg dat dit pad correct is naar je functions directory
+
+      - name: Run Web App Tests
+        run: npm test
+        working-directory: ./web-app # Zorg dat dit pad correct is naar je web-app directory
+
+      - name: Deploy to Firebase
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}'
+          projectId: 'YOUR_FIREBASE_PROJECT_ID' # VERVANG DIT MET JE EIGEN FIREBASE PROJECT ID
+          channelId: live # Of een ander kanaal (bijv. staging)
+          target: web-app # De naam van je hosting site in Firebase (optioneel als je maar één site hebt)
+          entryPoint: . # De root van je project

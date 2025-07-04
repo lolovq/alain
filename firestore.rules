@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Functie om gebruikersrol op te halen
+    function getUserRole(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.role;
+    }
+
+    // Gebruikers (Authentication & Rollen)
+    match /users/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || getUserRole(request.auth.uid) == 'admin'); // Eigen profiel of admin
+      allow create: if request.auth != null && request.auth.uid == userId; // Alleen eigen profiel aanmaken
+      // Alleen admin mag de rol aanpassen, of de gebruiker mag alleen zijn eigen displayname/foto aanpassen
+      allow update: if request.auth.uid == userId && (
+        ('role' not in request.resource.data || getUserRole(request.auth.uid) == 'admin') && // Rol mag alleen door admin gewijzigd worden
+        request.resource.data.keys().hasOnly(['displayName', 'photoURL', 'email']) // Voorbeeld: gebruiker mag alleen deze velden wijzigen
+      );
+      allow delete: if false; // Geen gebruiker mag zichzelf verwijderen via de frontend
+    }
+
+    // Diensten (Eigendom gebaseerd)
+    match /services/{serviceId} {
+      allow read: if request.auth != null && (resource.data.ownerId == request.auth.uid || getUserRole(request.auth.uid) == 'admin'); // Alleen eigenaar of admin
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.ownerId; // Alleen de eigenaar mag aanmaken
+      allow update: if request.auth.uid == resource.data.ownerId || getUserRole(request.auth.uid) == 'admin'; // Eigenaar of admin mag updaten
+      allow delete: if request.auth.uid == resource.data.ownerId || getUserRole(request.auth.uid) == 'admin'; // Eigenaar of admin mag verwijderen
+    }
+
+    // Boekingen (Complexe logica)
+    match /bookings/{bookingId} {
+      // Lezen: De boeker, de aanbieder, of een admin
+      allow read: if request.auth != null &&
+                    (request.auth.uid == resource.data.bookerId ||
+                     request.auth.uid == resource.data.providerId ||
+                     getUserRole(request.auth.uid) == 'admin');
+
+      // Creëren: Alleen geauthenticeerde gebruikers en ze mogen alleen zichzelf als boeker opgeven, en de providerId moet geldig zijn
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.bookerId;
+
+      // Updaten: ALLEEN via Cloud Function (bijv. als status verandert)
+      // Dit is CRUCIAAL. Alleen de Cloud Function heeft admin rechten, dus de client KAN de status niet manipuleren.
+      // Hier simuleer je dat de functie een 'admin' context heeft.
+      // Alternatief: Een specifieke regel die alleen wijzigingen van bepaalde velden toelaat door de eigenaar,
+      // maar een statuswijziging van een Cloud Function zou je via een FieldValue.increment() kunnen doen of een aparte functie.
+      // De veiligste manier is een Cloud Function via Admin SDK.
+      allow update: if false; // Geen directe updates vanaf de client! Updates moeten via Cloud Functions.
+      allow delete: if false; // Boekingen worden niet direct verwijderd.
+    }
+
+    // Notificaties (Alleen lezen door de ontvanger)
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if false; // Alleen Cloud Functions mogen notificaties aanmaken
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId && request.resource.data.keys().hasOnly(['read']); // Alleen 'read' status mag gewijzigd worden door ontvanger
+      allow delete: if false; // Notificaties worden niet direct verwijderd door de client
+    }
+
+    // Admin Dashboard data (indien apart opgeslagen of specifieke queries nodig zijn)
+    // Voor collecties die alleen door admins gelezen mogen worden
+    match /adminData/{document} {
+      allow read: if request.auth != null && getUserRole(request.auth.uid) == 'admin';
+    }
+  }
+}
